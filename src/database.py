@@ -334,6 +334,7 @@ def query_items(
     search: Optional[str] = None,
     topic: Optional[str] = None,
 ) -> list[dict]:
+    init_db()
     clauses = ["final_score >= :min_score"]
     params: dict[str, Any] = {"min_score": min_score, "limit": limit}
 
@@ -370,6 +371,7 @@ def query_items(
 
 
 def query_daily_stats(days: int = 30, topic: Optional[str] = None) -> list[dict]:
+    init_db()
     clauses = [f"date >= date('now', '-{days} days')"]
     params: dict[str, Any] = {}
     if topic and topic != "全部":
@@ -387,6 +389,7 @@ def query_daily_stats(days: int = 30, topic: Optional[str] = None) -> list[dict]
 
 
 def query_emerging_stats(days: int = 30, emerging_topic: Optional[str] = None) -> list[dict]:
+    init_db()
     clauses = [f"date >= date('now', '-{days} days')"]
     params: dict[str, Any] = {}
     if emerging_topic and emerging_topic != "全部":
@@ -404,6 +407,7 @@ def query_emerging_stats(days: int = 30, emerging_topic: Optional[str] = None) -
 
 
 def query_llm_selection_stat(date: Optional[str] = None) -> Optional[dict]:
+    init_db()
     sql = "SELECT * FROM llm_selection_stats"
     params: tuple[Any, ...] = ()
     if date:
@@ -416,18 +420,21 @@ def query_llm_selection_stat(date: Optional[str] = None) -> Optional[dict]:
 
 
 def get_distinct_sources() -> list[str]:
+    init_db()
     with get_connection() as conn:
         rows = conn.execute("SELECT DISTINCT source FROM items ORDER BY source").fetchall()
     return [row["source"] for row in rows]
 
 
 def get_distinct_dates() -> list[str]:
+    init_db()
     with get_connection() as conn:
         rows = conn.execute("SELECT DISTINCT date FROM items ORDER BY date DESC").fetchall()
     return [row["date"] for row in rows]
 
 
 def get_distinct_emerging_topics(limit: int = 50) -> list[str]:
+    init_db()
     with get_connection() as conn:
         rows = conn.execute(
             """
@@ -443,6 +450,7 @@ def get_distinct_emerging_topics(limit: int = 50) -> list[str]:
 
 
 def get_latest_date() -> Optional[str]:
+    init_db()
     with get_connection() as conn:
         row = conn.execute("SELECT MAX(date) AS d FROM items").fetchone()
     return row["d"] if row and row["d"] else None

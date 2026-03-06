@@ -8,7 +8,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.aggregator import build_trend_series, get_today_dashboard_data
-from src.database import get_latest_date
+from src.database import get_latest_date, init_db, migrate_db
 from src.utils import today_str
 
 
@@ -21,6 +21,9 @@ st.set_page_config(
 
 st.title("📊 科技趋势总览")
 st.caption("面向程序员的稳定骨架 + 动态雷达 + 分层精读总览")
+
+init_db()
+migrate_db()
 
 target_date = get_latest_date() or today_str()
 dashboard = get_today_dashboard_data(target_date)
