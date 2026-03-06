@@ -86,7 +86,10 @@ def _build_item(data: dict, existing_titles: list[str], topic_counts: dict[str, 
 
 def _run_llm_item_summary(selected_items: list[dict], all_items_by_id: dict[str, Item]) -> None:
     for row in selected_items:
-        item = all_items_by_id[row["id"]]
+        item = all_items_by_id.get(row["id"])
+        if item is None:
+            item = Item(**row)
+            all_items_by_id[row["id"]] = item
         item.one_line_summary = generate_one_line_summary(item.title, item.raw_summary, use_llm=True)
 
 
