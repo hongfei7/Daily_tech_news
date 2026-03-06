@@ -1,0 +1,3 @@
+2026-03-06 10:11:19.401 | INFO     | __main__:<module>:16 - 开始初始化科技趋势数据库...
+2026-03-06 10:11:19.403 | INFO     | src.database:init_db:80 - 数据库初始化完成: C:\Users\WuHongFei\Desktop\Daily_tec_news\tech_trend_dashboard\data\tech_trends.db
+2026-03-06 10:11:19.404 | INFO     | __main__:<module>:18 - 初始化完成！

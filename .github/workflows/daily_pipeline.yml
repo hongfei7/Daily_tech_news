@@ -1,0 +1,49 @@
+name: Daily Tech Trend Pipeline
+
+on:
+  schedule:
+    # 每天 UTC 时间凌晨 1 点运行 (北京时间早上 9 点)
+    - cron: '0 1 * * *'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Pipeline
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 确保 data 目录存在
+          mkdir -p data/raw
+          
+          # 初始化数据库
+          python scripts/init_db.py
+          
+          # 运行抓取与聚合
+          python scripts/run_pipeline.py --days 1
+
+      - name: Commit and Push Database
+        # 如果你想把更新后的 SQLite 存回仓库，可以打开下面的注释
+        # 注意：这可能会因为频繁提交导致仓库体积变大。
+        # 更推荐的做法是把生成的数据部署到云端或使用真正的 DB 实例。
+        run: |
+          # git config --local user.email "action@github.com"
+          # git config --local user.name "GitHub Action"
+          # git add data/tech_trends.db
+          # git commit -m "Auto-update daily tech trends [skip ci]" || echo "No changes to commit"
+          # git push
+          echo "Pipeline finished successfully."
