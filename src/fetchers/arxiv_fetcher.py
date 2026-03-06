@@ -26,7 +26,7 @@ def fetch_arxiv(days_back: int = 1) -> list[dict]:
     params = {
         "search_query": query,
         "sortBy": "lastUpdatedDate",
-        "sortOrder": "desc",
+        "sortOrder": "descending",
         "max_results": MAX_ITEMS_PER_SOURCE
     }
     
