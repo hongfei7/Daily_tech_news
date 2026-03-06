@@ -13,11 +13,19 @@ BASE_DIR = Path(__file__).parent.parent
 from dotenv import load_dotenv
 
 def get_minimax_key() -> str:
-    """获取从环境变量传入的 MiniMax 密钥（如 GitHub Actions 或本地 .env）"""
-    # 优先从环境变量读取
-    env_key = os.environ.get("MINIMAX_API_KEY") or os.environ.get("MiniMax_API_Key")
+    """获取 MiniMax 密钥，按优先级依次从环境变量读取"""
+    env_key = (
+        os.environ.get("MINIMAX_API_KEY")
+        or os.environ.get("MiniMax_API_Key")
+        or os.environ.get("MINIMAX_API_KEY_d")
+    )
     if env_key:
-        return env_key
+        return env_key.strip()
+
+    raise ValueError(
+        "未找到 MiniMax API Key，请设置环境变量："
+        "MINIMAX_API_KEY / MiniMax_API_Key / MINIMAX_API_KEY_d"
+    )
         
     # 本地可以使用 .env 文件
     load_dotenv(BASE_DIR / ".env")
