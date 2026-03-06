@@ -66,7 +66,7 @@ def _load_scoring_context() -> tuple[list[str], dict[str, int]]:
 
 
 def _build_item(data: dict, existing_titles: list[str], topic_counts: dict[str, int]) -> Item:
-    classified = classify_item_multi(data["title"], data["raw_summary"])
+    classified = classify_item_multi(data["title"], data["raw_summary"], source=data.get("source"))
     item = Item(
         id=data["id"],
         date=data["date"],

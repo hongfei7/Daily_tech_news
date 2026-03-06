@@ -2,12 +2,34 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from src.config import EMERGING_DISCOVERY
 from src.models import EmergingTopicStat
+
+
+CANONICAL_TAGS = {
+    "mcp": "MCP",
+    "model context protocol": "MCP",
+    "context protocol": "MCP",
+    "browser use": "Browser Agents",
+    "browser-use": "Browser Agents",
+    "browser agents": "Browser Agents",
+    "computer use": "Computer-use Agents",
+    "small reasoning": "Small Reasoning Models",
+    "reasoning model": "Small Reasoning Models",
+    "ai ide": "AI IDE Benchmark",
+    "cursor": "AI IDE Benchmark",
+    "windsurf": "AI IDE Benchmark",
+    "video generation": "Video Generation Tooling",
+    "video tooling": "Video Generation Tooling",
+    "on device": "On-device Agents",
+    "on-device": "On-device Agents",
+    "context7": "Context Engineering",
+}
 
 
 @dataclass
@@ -28,19 +50,25 @@ def _parse_date(value: str) -> datetime:
 
 
 def _normalize_tag(tag: str) -> str:
-    tag = " ".join(tag.split()).strip()
+    tag = str(tag).strip().replace("_", " ").replace("/", " ").replace("-", " ")
+    tag = re.sub(r"\s+", " ", tag).strip().lower()
+    if not tag:
+        return ""
+    for key, value in CANONICAL_TAGS.items():
+        if key in tag:
+            return value
+    if len(tag) <= 3:
+        return tag.upper()
+    if any(word in tag for word in ["agent", "protocol", "benchmark", "reasoning", "database", "retrieval", "vector"]):
+        return " ".join(part.capitalize() for part in tag.split()[:3])
     return tag[:80]
 
 
-def discover_emerging_topics(
-    items: list[dict],
-    target_date: str,
-    settings: dict | None = None,
-) -> list[EmergingCandidate]:
-    cfg = settings or EMERGING_DISCOVERY
-    if not items:
-        return []
+def _candidate_items(items: list[dict]) -> list[dict]:
+    return [item for item in items if item.get("tags") or item.get("keywords") or item.get("emerging_topic")]
 
+
+def _discover(items: list[dict], target_date: str, cfg: dict) -> list[EmergingCandidate]:
     target_dt = _parse_date(target_date)
     lookback_days = cfg["lookback_days"]
     recent_days = cfg["recent_days"]
@@ -57,18 +85,25 @@ def discover_emerging_topics(
         }
     )
 
-    for item in items:
+    for item in _candidate_items(items):
         item_date = _parse_date(item["date"])
         if item_date < baseline_cutoff or item_date > target_dt:
             continue
-        tags = item.get("tags") or item.get("keywords") or []
+        raw_topics = []
+        if item.get("emerging_topic"):
+            raw_topics.append(item["emerging_topic"])
+        raw_topics.extend(item.get("tags") or item.get("keywords") or [])
         if item.get("stable_topic") == "Other":
-            tags = list(dict.fromkeys(tags + [item.get("title", "")]))
-        for raw_tag in tags:
-            tag = _normalize_tag(str(raw_tag))
-            if len(tag) < 3:
-                continue
-            bucket = grouped[tag]
+            raw_topics.append(item.get("title", ""))
+
+        normalized_topics = []
+        for raw_topic in raw_topics:
+            topic = _normalize_tag(raw_topic)
+            if topic and len(topic) >= 3:
+                normalized_topics.append(topic)
+
+        for topic in list(dict.fromkeys(normalized_topics)):
+            bucket = grouped[topic]
             if item_date >= recent_cutoff:
                 bucket["recent_count"] += 1
             else:
@@ -109,6 +144,25 @@ def discover_emerging_topics(
 
     candidates.sort(key=lambda candidate: (candidate.emerging_score, candidate.avg_score), reverse=True)
     return candidates[: cfg["top_n_emerging"]]
+
+
+def discover_emerging_topics(
+    items: list[dict],
+    target_date: str,
+    settings: dict | None = None,
+) -> list[EmergingCandidate]:
+    cfg = dict(settings or EMERGING_DISCOVERY)
+    if not items:
+        return []
+
+    candidates = _discover(items, target_date, cfg)
+    if candidates or not cfg.get("auto_relax_if_empty", True):
+        return candidates
+
+    relaxed = dict(cfg)
+    relaxed["min_keyword_freq"] = max(2, cfg["min_keyword_freq"] - 1)
+    relaxed["min_growth_ratio"] = max(1.0, cfg["min_growth_ratio"] - 0.5)
+    return _discover(items, target_date, relaxed)
 
 
 def build_emerging_stats(target_date: str, candidates: list[EmergingCandidate]) -> list[EmergingTopicStat]:

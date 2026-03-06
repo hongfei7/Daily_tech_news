@@ -57,10 +57,11 @@ SCORE_WEIGHTS = {
 EMERGING_DISCOVERY = {
     "lookback_days": 7,
     "recent_days": 3,
-    "min_keyword_freq": 5,
-    "min_growth_ratio": 2.0,
+    "min_keyword_freq": 3,
+    "min_growth_ratio": 1.5,
     "min_source_count": 2,
     "top_n_emerging": 10,
+    "auto_relax_if_empty": True,
 }
 
 LLM_SELECTION = {
