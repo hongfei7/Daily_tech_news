@@ -14,10 +14,12 @@ from src.database import (
     get_distinct_sources,
     query_items,
 )
+from src.ui import apply_light_theme, apply_plot_style
 
 
 st.set_page_config(page_title="Explore | 数据探索", page_icon="🔎", layout="wide")
 st.title("🔎 Explore")
+apply_light_theme()
 
 dates = ["全部"] + get_distinct_dates()
 stable_topics = ["全部"] + TOPICS
@@ -55,18 +57,20 @@ if not items:
 
 df = pd.DataFrame(items)
 
-st.subheader("分布散点图")
+st.subheader("评分分布图")
 fig = px.scatter(
     df,
-    x="novelty_score",
+    x="final_score",
     y="importance_score",
     color="stable_topic",
     symbol="llm_selected",
-    size="final_score",
+    size="momentum_score",
     hover_name="title",
-    hover_data=["source", "emerging_topic", "selection_bucket", "selection_reason"],
+    hover_data=["source", "emerging_topic", "selection_bucket", "selection_reason", "novelty_score"],
+    labels={"final_score": "综合得分", "importance_score": "重要性", "momentum_score": "趋势动量"},
 )
-st.plotly_chart(fig, use_container_width=True)
+fig.update_layout(height=620)
+st.plotly_chart(apply_plot_style(fig), use_container_width=True)
 
 st.subheader("原始条目")
 show_columns = [
@@ -84,7 +88,12 @@ show_columns = [
 ]
 st.dataframe(
     df[show_columns].sort_values(["date", "final_score"], ascending=[False, False]),
-    column_config={"url": st.column_config.LinkColumn("链接")},
+    column_config={
+        "url": st.column_config.LinkColumn("链接"),
+        "one_line_summary": st.column_config.TextColumn("一句话摘要", width="medium"),
+        "title": st.column_config.TextColumn("标题", width="large"),
+        "selection_reason": st.column_config.TextColumn("选样原因", width="medium"),
+    },
     hide_index=True,
     use_container_width=True,
     height=560,
