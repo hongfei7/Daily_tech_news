@@ -75,10 +75,12 @@ def run_pipeline(days_back: int = FETCH_DAYS_BACK):
         """).fetchall()
         topic_counts = {r["topic"]: r["cnt"] for r in rows}
 
+    import concurrent.futures
+
     processed_items = []
+    total_len = len(unique_data)
     
-    # 4. 逐条处理：分类、摘要、打分
-    for i, data in enumerate(unique_data):
+    def process_item(i, data, existing_titles, topic_counts):
         title = data["title"]
         summary = data["raw_summary"]
         
@@ -105,7 +107,24 @@ def run_pipeline(days_back: int = FETCH_DAYS_BACK):
         
         # 打分
         score_item(item, existing_titles, topic_counts)
-        processed_items.append(item)
+        
+        if (i + 1) % 10 == 0 or (i + 1) == total_len:
+            logger.info(f"进度: 已处理 {i+1}/{total_len}...")
+            
+        return item
+
+    # 4. 逐条处理：分类、摘要、打分 (多线程并发加速)
+    logger.info("开始调用 LLM 处理摘要和分类，请耐心等待...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [
+            executor.submit(process_item, i, data, existing_titles, topic_counts)
+            for i, data in enumerate(unique_data)
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                processed_items.append(future.result())
+            except Exception as e:
+                logger.error(f"处理条目异常: {e}")
         
     # 5. 入库
     logger.info("正在将处理后的数据写入数据库...")
