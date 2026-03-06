@@ -18,14 +18,20 @@ def fetch_arxiv(days_back: int = 1) -> list[dict]:
     logger.info(f"开始抓取 arXiv (过去 {days_back} 天)...")
     items = []
     
-    from urllib.parse import quote_plus
+    import urllib.parse
     
     # 构造查询串：cs.AI OR cs.LG ...
     query = " OR ".join([f"cat:{c}" for c in ARXIV_CATEGORIES])
-    encoded_query = quote_plus(query)
-    # sortBy=lastUpdatedDate&sortOrder=desc 获取最新
-    # 这里为了简单，不做精确的天数过滤，直接取 max_results，后续依靠 date 在外部或这里过滤
-    url = f"http://export.arxiv.org/api/query?search_query={encoded_query}&sortBy=lastUpdatedDate&sortOrder=desc&max_results={MAX_ITEMS_PER_SOURCE}"
+    
+    params = {
+        "search_query": query,
+        "sortBy": "lastUpdatedDate",
+        "sortOrder": "desc",
+        "max_results": MAX_ITEMS_PER_SOURCE
+    }
+    
+    encoded_params = urllib.parse.urlencode(params)
+    url = f"http://export.arxiv.org/api/query?{encoded_params}"
 
     try:
         req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0 TechTrend/1.0'})
