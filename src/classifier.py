@@ -1,89 +1,200 @@
-"""
-classifier.py - 根据标题和摘要进行 Topic 分类（MVP阶段使用关键词匹配）
-"""
+"""Stable topic classification and lightweight tag extraction."""
+
+from __future__ import annotations
 
 import re
-from loguru import logger
+from collections import Counter
+
 from src.config import TOPICS
 
-# 关键词到 Topic 的映射
-TOPIC_RULES = {
+
+TOPIC_RULES: dict[str, list[str]] = {
     "AI Agents": [
-        r"\bagent(s)?\b", r"auto-gpt", r"babyagi", r"multi-agent", r"tool use", r"copilot"
+        r"\bagent(s)?\b",
+        r"browser use",
+        r"computer use",
+        r"tool use",
+        r"multi-agent",
+        r"workflow agent",
+        r"mcp",
+        r"model context protocol",
     ],
     "Open-source Models": [
-        r"llama", r"mistral", r"qwen", r"gemma", r"mixtral", r"open-source llm", r"\b7b\b", r"\b70b\b", r"open model"
+        r"\bllama\b",
+        r"\bmistral\b",
+        r"\bqwen\b",
+        r"\bgemma\b",
+        r"\bmixtral\b",
+        r"\bdeepseek\b",
+        r"open[- ]weights",
+        r"open[- ]source model",
+        r"small reasoning model",
     ],
     "AI Coding Tools": [
-        r"coding", r"code generation", r"copilot", r"cursor", r"code-llama", r"starcoder", r"devin", r"swe-bench"
+        r"cursor",
+        r"windsurf",
+        r"cline",
+        r"copilot",
+        r"devin",
+        r"swe-bench",
+        r"code review",
+        r"ai ide",
+        r"coding agent",
     ],
     "Chips / Compute / Infra": [
-        r"nvidia", r"gpu", r"h100", r"tpu", r"inference", r"vllm", r"tensorrt", r"cuda", r"compute", r"hardware"
+        r"\bgpu\b",
+        r"\btpu\b",
+        r"\bh100\b",
+        r"\bb200\b",
+        r"\bcuda\b",
+        r"\btensorrt\b",
+        r"inference",
+        r"serving",
+        r"throughput",
+        r"compiler",
     ],
     "Robotics": [
-        r"roboti[cs]", r"embodied", r"manipulation", r"optimus", r"figure 01", r"humanoid"
+        r"robot",
+        r"robotics",
+        r"humanoid",
+        r"embodied",
+        r"manipulation",
+        r"autonomous driving",
     ],
     "Security / AI Safety": [
-        r"safety", r"jailbreak", r"alignment", r"red teaming", r"security", r"hallucination", r"vulnerability"
+        r"safety",
+        r"alignment",
+        r"red team",
+        r"security",
+        r"jailbreak",
+        r"vulnerability",
+        r"policy model",
     ],
     "Data Infra / Vector DB / RAG": [
-        r"rag", r"vector db", r"pinecone", r"milvus", r"weaviate", r"qdrant", r"retrieval-augmented", r"database"
+        r"\brag\b",
+        r"vector db",
+        r"vector database",
+        r"milvus",
+        r"qdrant",
+        r"weaviate",
+        r"pinecone",
+        r"retrieval",
+        r"embedding",
     ],
     "Research Breakthroughs": [
-        r"state-of-the-art", r"\bsota\b", r"breakthrough", r"transformer", r"mamba", r"ssm", r"architecture", r"reward model", r"rlhf"
-    ]
+        r"\bsota\b",
+        r"breakthrough",
+        r"benchmark",
+        r"paper",
+        r"reasoning",
+        r"architecture",
+        r"diffusion",
+        r"world model",
+    ],
 }
 
-from src.llm_client import call_minimax_llm
+STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "this",
+    "that",
+    "from",
+    "into",
+    "using",
+    "new",
+    "open",
+    "source",
+    "model",
+    "models",
+    "tool",
+    "tools",
+    "launch",
+    "release",
+    "released",
+    "today",
+    "their",
+    "about",
+    "over",
+    "after",
+}
 
-def classify_item(title: str, summary: str, use_llm: bool = True) -> str:
-    """
-    使用 LLM 对抓取的数据进行准确的领域归类。
-    """
-    text = f"{title} {summary}".lower()
-    
-    # LLM 分类
-    if use_llm:
-        topics_str = ", ".join(TOPICS)
-        prompt = f"请将以下科技资讯归类到最合适的一个给定的主题中。你只能且必须从下面的主题列表中挑选一个完整的原样输出：[{topics_str}]。\n\n标题：{title}\n摘要：{summary}"
-        sys_prompt = "你是一个精确的分类器，只能输出预定列表里的一个主题，绝对不可添加任何标点符号、解释或不在列表内的新主题。"
-        
-        llm_topic = call_minimax_llm(prompt, sys_prompt)
-        if llm_topic:
-            llm_topic = llm_topic.strip(' "\'')
-            # 校验是否确实是一个有效topic（无视大小写）
-            for t in TOPICS:
-                if t.lower() == llm_topic.lower():
-                    return t
-                
-    # 失败或禁用时回退到关键词规则分类
+PHRASE_PATTERNS = [
+    r"\b[A-Z][a-zA-Z0-9]+(?:[- ][A-Z][a-zA-Z0-9]+)+\b",
+    r"\b[a-z]+(?:[-/][a-z0-9]+){1,3}\b",
+    r"\b[A-Z]{2,}(?:[-/][A-Z0-9]+)*\b",
+    r"\b[a-z]+ [a-z]+(?: model| agent| benchmark| protocol| inference| database| reasoning)\b",
+]
+
+
+def _normalize_text(title: str, summary: str) -> str:
+    return f"{title}\n{summary}".strip()
+
+
+def classify_stable_topic(title: str, summary: str) -> str:
+    text = _normalize_text(title, summary).lower()
     best_topic = "Other"
-    max_matches = 0
-    
-    for topic, pattern_list in TOPIC_RULES.items():
-        matches = 0
-        for pattern in pattern_list:
-            if re.search(pattern, text):
-                matches += 1
-        
-        if matches > max_matches:
-            max_matches = matches
+    best_score = 0
+
+    for topic in TOPIC_RULES:
+        score = sum(1 for pattern in TOPIC_RULES[topic] if re.search(pattern, text))
+        if score > best_score:
+            best_score = score
             best_topic = topic
-            
-    return best_topic
+
+    return best_topic if best_topic in TOPICS else "Other"
+
+
+def _extract_candidate_tokens(text: str) -> list[str]:
+    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9\-]{2,}\b", text)
+    return [word.lower() for word in words if word.lower() not in STOPWORDS]
+
+
+def extract_tags(title: str, summary: str, limit: int = 8) -> list[str]:
+    source_text = _normalize_text(title, summary)
+    lowered = source_text.lower()
+    candidates: Counter[str] = Counter()
+
+    for phrase_pattern in PHRASE_PATTERNS:
+        for match in re.findall(phrase_pattern, source_text):
+            cleaned = re.sub(r"\s+", " ", match.strip())
+            if len(cleaned) >= 3:
+                candidates[cleaned] += 3
+
+    for token in _extract_candidate_tokens(lowered):
+        if len(token) >= 4:
+            candidates[token] += 1
+
+    ordered = [tag for tag, _ in candidates.most_common() if tag.lower() not in STOPWORDS]
+    deduped: list[str] = []
+    seen = set()
+    for tag in ordered:
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(tag)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def classify_item(title: str, summary: str, use_llm: bool = False) -> str:
+    del use_llm
+    return classify_stable_topic(title, summary)
+
+
+def classify_item_multi(title: str, summary: str) -> dict[str, object]:
+    stable_topic = classify_stable_topic(title, summary)
+    tags = extract_tags(title, summary)
+    emerging_topic = tags[0] if stable_topic == "Other" and tags else ""
+    return {
+        "stable_topic": stable_topic,
+        "emerging_topic": emerging_topic,
+        "tags": tags,
+    }
+
 
 def get_keywords(title: str, summary: str) -> list[str]:
-    """
-    提取命中的关键词
-    """
-    text = f"{title} {summary}".lower()
-    matched = []
-    
-    for topic, pattern_list in TOPIC_RULES.items():
-        for pattern in pattern_list:
-            if re.search(pattern, text) and pattern not in matched:
-                # 简单清理正则符号以便展示
-                clean_p = pattern.replace(r"\b", "").replace(r"(s)?", "s")
-                matched.append(clean_p)
-                
-    return list(set(matched))[:5]  # 最多存5个
+    return extract_tags(title, summary, limit=5)

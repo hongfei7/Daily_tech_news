@@ -1,124 +1,115 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-
-# 使它可以引用 src
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.database import query_items, query_daily_stats
-from src.utils import get_latest_date, today_str
-from src.config import TOPICS
+import pandas as pd
+import plotly.express as px
+import streamlit as st
 
-st.set_page_config(page_title="Today | 今日罗盘", page_icon="🧭", layout="wide")
-st.title("🧭 今日科技罗盘")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# 获取最近有数据的日期
+from src.aggregator import get_today_dashboard_data
+from src.database import get_latest_date
+from src.utils import today_str
+
+
+st.set_page_config(page_title="Today | 科技趋势仪表盘", page_icon="📌", layout="wide")
+st.title("📌 今日科技趋势仪表盘")
+
 target_date = get_latest_date() or today_str()
 st.caption(f"数据日期: {target_date}")
 
-# 读取当前 target_date 的 items 和 stats
-items = query_items(date=target_date, limit=100)
-stats = query_daily_stats(days=7)  # 获取最近7天的每日统计
+dashboard = get_today_dashboard_data(target_date)
+items = dashboard["items"]
+stable_stats = dashboard["stable_stats"]
+emerging_stats = dashboard["emerging_stats"]
+selection_stats = dashboard["selection_stats"]
 
 if not items:
-    st.warning(f"由于尚未抓取，{target_date} 没有可用数据。请先执行 pipeline 或 backfill_demo_data.py")
+    st.warning("当前没有可展示的数据，请先运行 pipeline 或 backfill_demo_data。")
     st.stop()
 
-# 过滤出 target_date 的统计
-today_stats = [s for s in stats if s["date"] == target_date]
-# 如果当天还没聚合（比如 pipeline 没跑完），尝试用昨天
-if not today_stats:
-    st.warning("当天尚未进行 Topic 聚合，请运行 pipeline。将暂时展示列表数据。")
-    today_stats = []
-
-# --- 模块 A：Top Topics 横向条形图 ---
-st.header("🎯 最高优方向 (Top Topics)")
-if today_stats:
-    df_stats = pd.DataFrame(today_stats)
-    df_stats = df_stats.sort_values(by="final_score", ascending=True) # Plotly 中 ascending=True 把分数高的排在最上面
-    
+st.subheader("Stable Topics 主方向图")
+if stable_stats:
+    df_stable = pd.DataFrame(stable_stats).sort_values("final_score", ascending=True)
     fig = px.bar(
-        df_stats, 
-        x="final_score", 
-        y="topic", 
-        orientation='h',
+        df_stable,
+        x="final_score",
+        y="topic",
+        orientation="h",
         color="trend_delta_7d",
-        color_continuous_scale="RdBu_r", # 暖色代表上升，冷色代表下降
-        title="今日热图 (颜色代表较过去7天的热度变化)",
-        labels={"final_score": "综合热度分", "topic": "科技方向"}
+        color_continuous_scale="Tealrose",
+        labels={"final_score": "今日热度", "topic": "稳定主题"},
     )
-    fig.update_layout(height=400)
+    fig.update_layout(height=420)
     st.plotly_chart(fig, use_container_width=True)
 
-# --- 模块 B：一句话摘要卡片区 ---
-st.divider()
-st.header("💡 一句话速览")
-
-# 选出分数最高的前 4 个 topic
-df_sorted_stats = sorted(today_stats, key=lambda x: x["final_score"], reverse=True)[:4]
-
-# 如果没有 stat 用 items 去分组模拟一下
-if not df_sorted_stats:
-    st.write("暂无聚合数据，请执行 pipeline 聚合。")
-
-cols = st.columns(4)
-for i, stat in enumerate(df_sorted_stats):
-    topic = stat["topic"]
-    score = stat["final_score"]
+st.subheader("Stable Topic 一句话卡片")
+card_columns = st.columns(3)
+for idx, stat in enumerate(stable_stats[:6]):
     delta = stat["trend_delta_7d"]
-    
-    if delta > 1.0:
-        trend_icon = "🔥 ↑"
-    elif delta < -1.0:
-        trend_icon = "❄️ ↓"
-    else:
-        trend_icon = "稳定 →"
-        
-    with cols[i % 4]:
-        st.info(f"**{topic}**\n\n综合分: {score} | {trend_icon}")
-        st.write(f"*{stat['top_summary']}*")
-        
-        # 找一条该 topic 的链接
-        topic_items = [item for item in items if item["topic"] == topic]
-        if topic_items:
-            best_item = max(topic_items, key=lambda x: x["final_score"])
-            st.markdown(f"🔗 [{best_item['title']}]({best_item['url']})")
+    arrow = "↑" if delta > 1 else "↓" if delta < -1 else "→"
+    topic_items = [item for item in items if item.get("stable_topic") == stat["topic"]]
+    best_item = max(topic_items, key=lambda item: item.get("final_score", 0.0)) if topic_items else None
+    with card_columns[idx % 3]:
+        st.markdown(f"### {stat['topic']} {arrow}")
+        st.write(stat["top_summary"])
+        if best_item:
+            st.markdown(f"[代表链接]({best_item['url']})")
 
-# --- 模块 C：今日高价值事件表 ---
 st.divider()
-st.header("📋 高价值事件列表")
-
-col1, col2 = st.columns(2)
-with col1:
-    filter_topic = st.selectbox("筛选方向", ["全部"] + TOPICS)
-with col2:
-    sources = list(set([item["source"] for item in items]))
-    filter_source = st.selectbox("筛选来源", ["全部"] + sources)
-
-# 过滤数据
-filtered_items = [i for i in items if i["final_score"] > 0]
-if filter_topic != "全部":
-    filtered_items = [i for i in filtered_items if i["topic"] == filter_topic]
-if filter_source != "全部":
-    filtered_items = [i for i in filtered_items if i["source"] == filter_source]
-
-# 转换为 DataFrame 用于展示
-df_items = pd.DataFrame(filtered_items)
-if not df_items.empty:
-    df_items = df_items[["source", "title", "topic", "final_score", "one_line_summary", "url"]]
-    df_items = df_items.sort_values(by="final_score", ascending=False)
-    
-    st.dataframe(
-        df_items,
-        column_config={
-            "url": st.column_config.LinkColumn("链接"),
-            "final_score": st.column_config.NumberColumn("热度分", format="%.1f"),
-        },
-        hide_index=True,
-        use_container_width=True,
-        height=500
-    )
+st.subheader("Emerging Now")
+if emerging_stats:
+    for stat in emerging_stats[:8]:
+        topic_items = [item for item in items if item.get("emerging_topic") == stat["emerging_topic"]]
+        best_item = max(topic_items, key=lambda item: item.get("final_score", 0.0)) if topic_items else None
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 3])
+        col1.markdown(f"**{stat['emerging_topic']}**")
+        col2.metric("增长率", f"{stat['growth_rate']:.1f}x")
+        col3.metric("来源数", int(stat["source_count"]))
+        col4.write(stat["top_summary"])
+        if best_item:
+            st.markdown(f"[代表链接]({best_item['url']})")
 else:
-    st.info("没有满足上述条件的数据。")
+    st.info("今日没有满足阈值的动态爆点。")
+
+st.divider()
+st.subheader("代表性覆盖说明")
+if selection_stats:
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("总条目", int(selection_stats["total_items"]))
+    col2.metric("LLM 精读", int(selection_stats["llm_items_selected"]))
+    col3.metric("Stable 覆盖", int(selection_stats["stable_topic_count"]))
+    col4.metric("Emerging 覆盖", int(selection_stats["emerging_topic_count"]))
+    col5.metric("覆盖率", f"{selection_stats['coverage_ratio']:.1%}")
+    st.write(selection_stats["notes"])
+    bucket_df = pd.DataFrame(
+        [
+            {"bucket": "top_pool", "count": selection_stats["top_bucket_count"]},
+            {"bucket": "stable_pool", "count": selection_stats["stable_bucket_count"]},
+            {"bucket": "emerging_pool", "count": selection_stats["emerging_bucket_count"]},
+        ]
+    )
+    fig_bucket = px.pie(bucket_df, values="count", names="bucket", hole=0.5)
+    st.plotly_chart(fig_bucket, use_container_width=True)
+
+st.divider()
+st.subheader("今日条目")
+df_items = pd.DataFrame(items)
+show_columns = [
+    "source",
+    "stable_topic",
+    "emerging_topic",
+    "final_score",
+    "llm_selected",
+    "selection_bucket",
+    "one_line_summary",
+    "title",
+    "url",
+]
+st.dataframe(
+    df_items[show_columns].sort_values("final_score", ascending=False),
+    column_config={"url": st.column_config.LinkColumn("链接")},
+    hide_index=True,
+    use_container_width=True,
+    height=460,
+)

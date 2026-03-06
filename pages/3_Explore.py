@@ -1,76 +1,91 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.database import query_items
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from src.config import TOPICS
+from src.database import (
+    get_distinct_dates,
+    get_distinct_emerging_topics,
+    get_distinct_sources,
+    query_items,
+)
 
-st.set_page_config(page_title="Explore | 探索", page_icon="🔭", layout="wide")
-st.title("🔭 数据探索")
 
-st.markdown("这一页用于深入探索原始数据，找到高新鲜度和高重要性的“宝藏信息”。")
+st.set_page_config(page_title="Explore | 数据探索", page_icon="🔎", layout="wide")
+st.title("🔎 Explore")
 
-# 读取最近的一些数据
-# 由于需要画散点图，我们不去强求某一天，取最近 300 条分高的
-items = query_items(limit=300)
+dates = ["全部"] + get_distinct_dates()
+stable_topics = ["全部"] + TOPICS
+emerging_topics = ["全部"] + get_distinct_emerging_topics()
+sources = ["全部"] + get_distinct_sources()
+
+col1, col2, col3, col4, col5 = st.columns(5)
+with col1:
+    selected_date = st.selectbox("日期", dates)
+with col2:
+    selected_stable = st.selectbox("Stable Topic", stable_topics)
+with col3:
+    selected_emerging = st.selectbox("Emerging Topic", emerging_topics)
+with col4:
+    selected_source = st.selectbox("Source", sources)
+with col5:
+    llm_filter = st.selectbox("LLM Selected", ["全部", "是", "否"])
+
+search = st.text_input("搜索标题或摘要")
+llm_selected = None if llm_filter == "全部" else 1 if llm_filter == "是" else 0
+
+items = query_items(
+    date=None if selected_date == "全部" else selected_date,
+    stable_topic=None if selected_stable == "全部" else selected_stable,
+    emerging_topic=None if selected_emerging == "全部" else selected_emerging,
+    source=None if selected_source == "全部" else selected_source,
+    llm_selected=llm_selected,
+    search=search or None,
+    limit=1000,
+)
+
 if not items:
-    st.warning("暂无数据。")
+    st.info("没有匹配到数据。")
     st.stop()
-    
-df_items = pd.DataFrame(items)
 
-# --- 模块 A：新鲜度 × 重要性散点图 ---
-st.header("🧭 价值发现罗盘 (新鲜度 vs 绝对重要性)")
+df = pd.DataFrame(items)
 
-fig_scatter = px.scatter(
-    df_items,
+st.subheader("分布散点图")
+fig = px.scatter(
+    df,
     x="novelty_score",
     y="importance_score",
-    color="topic",
+    color="stable_topic",
+    symbol="llm_selected",
     size="final_score",
     hover_name="title",
-    hover_data=["source", "date", "final_score"],
-    title="气泡越大代表综合得分(final_score)越高",
-    labels={"novelty_score": "新鲜度 (Novelty)", "importance_score": "重要度 (Importance)"}
+    hover_data=["source", "emerging_topic", "selection_bucket", "selection_reason"],
 )
-fig_scatter.update_layout(height=600)
-st.plotly_chart(fig_scatter, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True)
 
-# --- 模块 B：原始条目搜索与过滤 ---
-st.divider()
-st.header("📖 原始数据库检索")
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    search_q = st.text_input("🔍 搜索标题", "")
-with col2:
-    f_topic = st.selectbox("📂 过滤主题", ["全部"] + TOPICS)
-with col3:
-    sources = ["全部"] + list(df_items["source"].unique())
-    f_source = st.selectbox("🌐 过滤来源", sources)
-
-# 后端执行检索
-results = query_items(
-    limit=100,
-    search=search_q if search_q else None,
-    topic=f_topic if f_topic != "全部" else None,
-    source=f_source if f_source != "全部" else None
+st.subheader("原始条目")
+show_columns = [
+    "date",
+    "source",
+    "stable_topic",
+    "emerging_topic",
+    "llm_selected",
+    "selection_bucket",
+    "selection_reason",
+    "final_score",
+    "one_line_summary",
+    "title",
+    "url",
+]
+st.dataframe(
+    df[show_columns].sort_values(["date", "final_score"], ascending=[False, False]),
+    column_config={"url": st.column_config.LinkColumn("链接")},
+    hide_index=True,
+    use_container_width=True,
+    height=560,
 )
-
-if results:
-    df_res = pd.DataFrame(results)
-    df_res = df_res[["date", "source", "topic", "final_score", "title", "url"]]
-    st.dataframe(
-        df_res,
-        column_config={
-            "url": st.column_config.LinkColumn("外部链接"),
-        },
-        hide_index=True,
-        use_container_width=True
-    )
-else:
-    st.info("没有找到匹配的数据。")

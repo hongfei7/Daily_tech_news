@@ -1,82 +1,91 @@
-"""
-aggregator.py - 按天计算 Topic 粒度的统计数据
-"""
+"""Aggregation helpers for stable topics, emerging topics, and source coverage."""
 
-from loguru import logger
+from __future__ import annotations
 
-from src.database import query_items, upsert_daily_stat, query_daily_stats
-from src.models import DailyTopicStat
+import math
+from collections import defaultdict
+
 from src.config import TOPICS
+from src.database import (
+    query_daily_stats,
+    query_emerging_stats,
+    query_items,
+    query_llm_selection_stat,
+    upsert_daily_stat,
+)
+from src.models import DailyTopicStat
+from src.summarizer import summarize_stable_topic
 
-def aggregate_daily_stats(target_date: str):
-    """
-    聚合指定日期的 items 数据，计算每个 topic 的均分，并对比过去 7 天产生趋势。
-    将结果写入 daily_topic_stats 表。
-    """
-    logger.info(f"开始聚合 {target_date} 的数据...")
-    
-    # 1. 获取当天的所有 items
-    items = query_items(date=target_date, limit=1000)
+
+def aggregate_daily_stats(target_date: str) -> list[DailyTopicStat]:
+    items = query_items(date=target_date, limit=5000)
     if not items:
-        logger.warning(f"日期 {target_date} 没有抓取到数据，跳过聚合。")
-        return
-        
-    # 分组
-    topic_groups = {t: [] for t in TOPICS}
-    for item in items:
-        t = item["topic"]
-        if t in topic_groups:
-            topic_groups[t].append(item)
-        else:
-            topic_groups["Other"].append(item)
-            
-    # 2. 获取过去 7 天的统计数据用于计算 trend_delta_7d
-    past_stats = query_daily_stats(days=7)
-    past_topic_avg = {}
-    
-    for t in TOPICS:
-        t_stats = [s for s in past_stats if s["topic"] == t and s["date"] < target_date]
-        if t_stats:
-            avg_past_score = sum(s["final_score"] for s in t_stats) / len(t_stats)
-            past_topic_avg[t] = avg_past_score
-        else:
-            past_topic_avg[t] = 0.0
+        return []
 
-    # 3. 计算并保存
-    for topic, group in topic_groups.items():
+    past_stats = query_daily_stats(days=7)
+    historical_average = {}
+    for topic in TOPICS:
+        values = [row["final_score"] for row in past_stats if row["topic"] == topic and row["date"] < target_date]
+        historical_average[topic] = sum(values) / len(values) if values else 0.0
+
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for item in items:
+        groups[item.get("stable_topic", "Other")].append(item)
+
+    results: list[DailyTopicStat] = []
+    for topic in TOPICS:
+        group = groups.get(topic, [])
         if not group:
             continue
-            
         count = len(group)
-        avg_imp = sum(i["importance_score"] for i in group) / count
-        avg_nov = sum(i["novelty_score"] for i in group) / count
-        avg_mom = sum(i["momentum_score"] for i in group) / count
-        
-        # Topic 的 final_score 可以是 top 3 item 的平均，或者全体平均
-        # 这里为了突出价值，取全体平均 + 数量对数加成
-        import math
-        base_score = sum(i["final_score"] for i in group) / count
-        vol_bonus = min(15.0, math.log10(count + 1) * 5) 
-        topic_final_score = min(100.0, base_score + vol_bonus)
-        
-        trend_delta = topic_final_score - past_topic_avg[t]
-        
-        # 挑选最高分的摘要作为代表
-        top_item = max(group, key=lambda x: x["final_score"])
-        top_summary = top_item["one_line_summary"] or top_item["title"]
-        
+        avg_importance = sum(item.get("importance_score", 0.0) for item in group) / count
+        avg_novelty = sum(item.get("novelty_score", 0.0) for item in group) / count
+        avg_momentum = sum(item.get("momentum_score", 0.0) for item in group) / count
+        base_score = sum(item.get("final_score", 0.0) for item in group) / count
+        topic_final_score = min(100.0, base_score + min(15.0, math.log10(count + 1) * 5))
+        trend_delta = topic_final_score - historical_average.get(topic, 0.0)
+        summary = summarize_stable_topic(topic, group, trend_delta)
         stat = DailyTopicStat(
             date=target_date,
             topic=topic,
             item_count=count,
-            avg_importance=round(avg_imp, 3),
-            avg_novelty=round(avg_nov, 3),
-            avg_momentum=round(avg_mom, 3),
+            avg_importance=round(avg_importance, 3),
+            avg_novelty=round(avg_novelty, 3),
+            avg_momentum=round(avg_momentum, 3),
             final_score=round(topic_final_score, 1),
             trend_delta_7d=round(trend_delta, 1),
-            top_summary=top_summary
+            top_summary=summary,
         )
-        
         upsert_daily_stat(stat)
-        
-    logger.info(f"聚合完成: {target_date}")
+        results.append(stat)
+    return results
+
+
+def get_today_dashboard_data(target_date: str) -> dict:
+    items = query_items(date=target_date, limit=5000)
+    stable_stats = [row for row in query_daily_stats(days=7) if row["date"] == target_date]
+    emerging_stats = [row for row in query_emerging_stats(days=7) if row["date"] == target_date]
+    selection_stats = query_llm_selection_stat(target_date) or {}
+    return {
+        "items": items,
+        "stable_stats": sorted(stable_stats, key=lambda row: row["final_score"], reverse=True),
+        "emerging_stats": sorted(emerging_stats, key=lambda row: row["growth_rate"], reverse=True),
+        "selection_stats": selection_stats,
+    }
+
+
+def build_trend_series(days: int = 30) -> dict:
+    stable = query_daily_stats(days=days)
+    emerging = query_emerging_stats(days=days)
+    items = query_items(limit=10000)
+    source_heatmap: dict[tuple[str, str], int] = defaultdict(int)
+    for item in items:
+        source_heatmap[(item.get("stable_topic", "Other"), item["source"])] += 1
+    return {
+        "stable": stable,
+        "emerging": emerging,
+        "source_heatmap": [
+            {"stable_topic": stable_topic, "source": source, "count": count}
+            for (stable_topic, source), count in source_heatmap.items()
+        ],
+    }

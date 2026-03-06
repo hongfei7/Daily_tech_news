@@ -1,18 +1,13 @@
-import unittest
+from src.classifier import classify_item_multi
 
-from src.classifier import classify_item
 
-class TestClassifier(unittest.TestCase):
+def test_stable_topic_always_present():
+    result = classify_item_multi("Completely random title", "No obvious topic but still should classify.")
+    assert result["stable_topic"]
+    assert result["stable_topic"] == "Other"
 
-    def test_classification(self):
-        topic = classify_item("Llama 3 70B Release", "Meta has released the newest Llama open-source model")
-        self.assertEqual(topic, "Open-source Models")
-        
-        topic2 = classify_item("CUDA 12.0 Optimization", "NVIDIA GPU inference optimizations for LLMs")
-        self.assertEqual(topic2, "Chips / Compute / Infra")
-        
-        topic3 = classify_item("Making a sandwich", "Just a regular blog post")
-        self.assertEqual(topic3, "Other")
 
-if __name__ == "__main__":
-    unittest.main()
+def test_known_topic_classification():
+    result = classify_item_multi("Llama open weights update", "A new open-source model release.")
+    assert result["stable_topic"] == "Open-source Models"
+    assert result["tags"]

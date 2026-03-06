@@ -1,34 +1,59 @@
-"""
-summarizer.py - 为每个 Item 生成一句话摘要
-"""
+"""Rule-first summarization with optional LLM enhancement."""
+
+from __future__ import annotations
 
 import re
-from loguru import logger
-from src.utils import truncate
-from src.llm_client import call_minimax_llm
 
-def generate_one_line_summary(title: str, raw_summary: str, use_llm: bool = True) -> str:
-    """
-    优先使用 MiniMax LLM 生成对程序员有价值的一句话摘要，如果失败则尝试截断组合。
-    """
+from src.llm_client import call_minimax_llm
+from src.utils import truncate
+
+
+def generate_one_line_summary(title: str, raw_summary: str, use_llm: bool = False) -> str:
     if use_llm:
-        prompt = f"请提取以下科技资讯的核心信息，并用中文写一句对程序员有价值的一句话摘要，体现方向和价值。尽量在50字左右，不要超过80字。\n标题：{title}\n摘要：{raw_summary}"
-        sys_prompt = "你是一个专为程序员服务的科技趋势提炼助手。直接输出一句话摘要，不要带任何前缀或废话。"
-        
-        llm_summary = call_minimax_llm(prompt, sys_prompt)
+        prompt = (
+            "请用中文写一句不超过60字的摘要，强调这条科技信息对程序员意味着什么，不要复述标题。\n"
+            f"标题：{title}\n摘要：{raw_summary}"
+        )
+        llm_summary = call_minimax_llm(prompt, "你是程序员科技新闻编辑。")
         if llm_summary:
-            return truncate(llm_summary.strip(' "\''), max_chars=80)
-    
-    # 当前为占位：直接尝试组合标题和前 50 字描述
-    clean_desc = re.sub(r'\[.*?\]', '', raw_summary)  # 去掉开头的类似 [Stars: 100]
-    clean_desc = clean_desc.strip()
-    
-    # 取第一句话或者前 60 个字符
-    match = re.search(r'^(.*?)[.?!。？！]', clean_desc)
-    if match:
-        first_sentence = match.group(1)
+            return truncate(llm_summary.strip(), max_chars=80)
+
+    summary = re.sub(r"\[[^\]]+\]", "", raw_summary).strip()
+    summary = re.sub(r"\s+", " ", summary)
+    lead = truncate(summary, max_chars=42) if summary else ""
+    if any(keyword in title.lower() for keyword in ["agent", "copilot", "cursor", "devin"]):
+        prefix = "这意味着 AI 自动化开发工具链继续前移"
+    elif any(keyword in title.lower() for keyword in ["gpu", "cuda", "inference", "nvidia"]):
+        prefix = "这意味着模型部署和推理成本结构可能继续变化"
+    elif any(keyword in title.lower() for keyword in ["rag", "vector", "database", "retrieval"]):
+        prefix = "这意味着工程侧检索和数据基础设施仍在快速演进"
     else:
-        first_sentence = truncate(clean_desc, max_chars=60).rstrip('…')
-        
-    combined = f"{title}: {first_sentence}"
-    return truncate(combined, max_chars=80)
+        prefix = "这意味着开发者需要关注相关技术栈的新能力"
+    return truncate(f"{prefix}：{lead or title}", max_chars=80)
+
+
+def summarize_stable_topic(topic: str, items: list[dict], trend_delta: float) -> str:
+    if not items:
+        return f"{topic} 今日暂无显著新增。"
+    top_item = max(items, key=lambda item: item.get("final_score", 0.0))
+    trend_text = "升温" if trend_delta > 1 else "回落" if trend_delta < -1 else "持平"
+    return truncate(
+        f"{topic} 今日由《{top_item['title']}》带动，近7天整体{trend_text}，说明该方向仍在持续吸收开发者注意力。",
+        88,
+    )
+
+
+def summarize_emerging_topic(topic: str, items: list[dict], growth_rate: float) -> str:
+    if not items:
+        return f"{topic} 最近升温，但暂无代表样本。"
+    top_item = max(items, key=lambda item: item.get("final_score", 0.0))
+    text = f"{topic} 近几天增长 {growth_rate:.1f}x，当前更偏"
+    title = top_item["title"].lower()
+    if any(word in title for word in ["paper", "benchmark", "reasoning", "research"]):
+        text += "研究热"
+    elif any(word in title for word in ["tool", "sdk", "framework", "infra", "database"]):
+        text += "工程热"
+    else:
+        text += "产品热"
+    text += f"，代表链接是《{top_item['title']}》。"
+    return truncate(text, 90)
