@@ -26,7 +26,7 @@ jobs:
       - name: Run Pipeline
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}  # 从 GitHub Secrets 注入
+          MINIMAX_API_KEY: ${{ secrets.MiniMax_API_Key }}  # 从 GitHub Secrets 注入
         run: |
           # 确保 data 目录存在
           mkdir -p data/raw

@@ -2,31 +2,30 @@
 llm_client.py - 封装对 MiniMax API 的调用
 """
 
-import json
+import os
 import requests
 from loguru import logger
 from pathlib import Path
 from typing import Optional
 
 BASE_DIR = Path(__file__).parent.parent
-APIKEY_PATH = BASE_DIR / "src" / "apikey.json"
 
-import os
+from dotenv import load_dotenv
 
 def get_minimax_key() -> str:
-    """获取 apikey.json 中保存的 Gemini / MiniMax 密钥，或从环境变量获取（用于 GitHub Actions）"""
+    """获取从环境变量传入的 MiniMax 密钥（如 GitHub Actions 或本地 .env）"""
     # 优先从环境变量读取
-    env_key = os.environ.get("MINIMAX_API_KEY")
+    env_key = os.environ.get("MINIMAX_API_KEY") or os.environ.get("MiniMax_API_Key")
     if env_key:
         return env_key
         
-    try:
-        if APIKEY_PATH.exists():
-            with open(APIKEY_PATH, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            return config.get("api_keys", {}).get("gemini", "")
-    except Exception as e:
-        logger.error(f"读取 apikey.json 失败: {e}")
+    # 本地可以使用 .env 文件
+    load_dotenv(BASE_DIR / ".env")
+    env_key = os.environ.get("MINIMAX_API_KEY") or os.environ.get("MiniMax_API_Key")
+    if env_key:
+        return env_key
+        
+    logger.error("未找到 MiniMax API 密钥，请在环境或 .env 中配置 MiniMax_API_Key")
     return ""
 
 def call_minimax_llm(prompt: str, system_prompt: str = "") -> Optional[str]:
