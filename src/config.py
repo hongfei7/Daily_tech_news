@@ -102,3 +102,7 @@ HN_MAX_ITEMS  = 30        # 每次最多取条数
 
 # ─── 去重阈值 ────────────────────────────────────────────
 TITLE_SIMILARITY_THRESHOLD = 0.85   # 标题相似度超过此值则视为重复
+
+# ─── LLM 优化 ────────────────────────────────────────────
+MAX_LLM_ITEMS_PER_RUN = int(os.getenv("MAX_LLM_ITEMS_PER_RUN", "30"))  # 每次最多调用 LLM 处理的任务数
+LLM_SCORE_THRESHOLD = float(os.getenv("LLM_SCORE_THRESHOLD", "30.0"))   # 只有初步评分超过此值才调用 LLM

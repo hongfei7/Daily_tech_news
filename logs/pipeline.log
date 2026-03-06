@@ -1,0 +1,9 @@
+2026-03-06 11:26:37.663 | INFO     | __main__:fetch_dblp:20 - 开始抓取 DBLP (过去 1 天)...
+2026-03-06 11:26:38.793 | ERROR    | __main__:fetch_dblp:75 - 抓取 DBLP 失败 (query=large language models): <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1032)>
+2026-03-06 11:26:39.463 | ERROR    | __main__:fetch_dblp:75 - 抓取 DBLP 失败 (query=prompt engineering): <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1032)>
+2026-03-06 11:26:40.121 | ERROR    | __main__:fetch_dblp:75 - 抓取 DBLP 失败 (query=retrieval augmented generation): <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1032)>
+2026-03-06 11:26:40.796 | ERROR    | __main__:fetch_dblp:75 - 抓取 DBLP 失败 (query=agents): <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1032)>
+2026-03-06 11:26:41.759 | ERROR    | __main__:fetch_dblp:75 - 抓取 DBLP 失败 (query=robotics): <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1032)>
+2026-03-06 11:26:41.761 | INFO     | __main__:fetch_dblp:77 - DBLP 抓取完成，共 0 条数据。
+2026-03-06 11:27:07.487 | INFO     | __main__:fetch_dblp:20 - 开始抓取 DBLP (过去 1 天)...
+2026-03-06 11:27:15.587 | INFO     | __main__:fetch_dblp:80 - DBLP 抓取完成，共 220 条数据。

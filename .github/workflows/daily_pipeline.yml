@@ -9,8 +9,6 @@ on:
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout code
@@ -39,13 +37,12 @@ jobs:
           # 运行抓取与聚合
           python scripts/run_pipeline.py --days 1
 
-      - name: Commit and Push Database
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          # 使用 -f 强制添加，忽略 .gitignore 中对 .db 文件的限制
-          git add -f data/tech_trends.db
-          # 提交更改，如果没有更改则跳过
-          git commit -m "Auto-update daily tech trends [skip ci]" || echo "No changes to commit"
-          git push
-          echo "Pipeline finished successfully."
+      - name: Upload Database Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tech-trends-db
+          path: data/tech_trends.db
+          retention-days: 7
+
+      - name: Finalize
+        run: echo "Pipeline finished successfully. Database uploaded as artifact."

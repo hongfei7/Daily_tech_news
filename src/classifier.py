@@ -36,27 +36,27 @@ TOPIC_RULES = {
 
 from src.llm_client import call_minimax_llm
 
-def classify_item(title: str, summary: str) -> str:
+def classify_item(title: str, summary: str, use_llm: bool = True) -> str:
     """
     使用 LLM 对抓取的数据进行准确的领域归类。
-    如果没有匹配或模型出错，则退回使用关键词匹配规则归类为 "Other"。
     """
     text = f"{title} {summary}".lower()
     
     # LLM 分类
-    topics_str = ", ".join(TOPICS)
-    prompt = f"请将以下科技资讯归类到最合适的一个给定的主题中。你只能且必须从下面的主题列表中挑选一个完整的原样输出：[{topics_str}]。\n\n标题：{title}\n摘要：{summary}"
-    sys_prompt = "你是一个精确的分类器，只能输出预定列表里的一个主题，绝对不可添加任何标点符号、解释或不在列表内的新主题。"
-    
-    llm_topic = call_minimax_llm(prompt, sys_prompt)
-    if llm_topic:
-        llm_topic = llm_topic.strip(' "\'')
-        # 校验是否确实是一个有效topic（无视大小写）
-        for t in TOPICS:
-            if t.lower() == llm_topic.lower():
-                return t
+    if use_llm:
+        topics_str = ", ".join(TOPICS)
+        prompt = f"请将以下科技资讯归类到最合适的一个给定的主题中。你只能且必须从下面的主题列表中挑选一个完整的原样输出：[{topics_str}]。\n\n标题：{title}\n摘要：{summary}"
+        sys_prompt = "你是一个精确的分类器，只能输出预定列表里的一个主题，绝对不可添加任何标点符号、解释或不在列表内的新主题。"
+        
+        llm_topic = call_minimax_llm(prompt, sys_prompt)
+        if llm_topic:
+            llm_topic = llm_topic.strip(' "\'')
+            # 校验是否确实是一个有效topic（无视大小写）
+            for t in TOPICS:
+                if t.lower() == llm_topic.lower():
+                    return t
                 
-    # 失败回退到关键词规则分类
+    # 失败或禁用时回退到关键词规则分类
     best_topic = "Other"
     max_matches = 0
     

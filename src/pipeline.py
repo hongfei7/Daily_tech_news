@@ -81,56 +81,76 @@ def run_pipeline(days_back: int = FETCH_DAYS_BACK):
         """).fetchall()
         topic_counts = {r["topic"]: r["cnt"] for r in rows}
 
+    from src.config import MAX_LLM_ITEMS_PER_RUN, LLM_SCORE_THRESHOLD
     import concurrent.futures
 
-    processed_items = []
-    total_len = len(unique_data)
-    
-    def process_item(i, data, existing_titles, topic_counts):
-        title = data["title"]
-        summary = data["raw_summary"]
+    # 4. 预处理：初步分级
+    logger.info("正在执行初步评分与筛选...")
+    pre_processed_items = []
+    for i, data in enumerate(unique_data):
+        # 初始分类（仅规则）
+        topic = classify_item(data["title"], data["raw_summary"], use_llm=False)
+        keywords = get_keywords(data["title"], data["raw_summary"])
+        # 初始摘要（规则处理）
+        one_line = generate_one_line_summary(data["title"], data["raw_summary"], use_llm=False)
         
-        # 归类
-        topic = classify_item(title, summary)
-        keywords = get_keywords(title, summary)
-        
-        # 摘要
-        one_line = generate_one_line_summary(title, summary)
-        
-        # 组装为 Pydantic Model
         item = Item(
             id=data["id"],
             date=data["date"],
             source=data["source"],
-            title=title,
+            title=data["title"],
             url=data["url"],
-            raw_summary=summary,
+            raw_summary=data["raw_summary"],
             one_line_summary=one_line,
             topic=topic,
             keywords=keywords,
-            # 其余分数先用默认值，下面计算
         )
-        
-        # 打分
+        # 初步打分
         score_item(item, existing_titles, topic_counts)
-        
-        if (i + 1) % 10 == 0 or (i + 1) == total_len:
-            logger.info(f"进度: 已处理 {i+1}/{total_len}...")
-            
+        pre_processed_items.append(item)
+
+    # 按分数从高到低排序
+    pre_processed_items.sort(key=lambda x: x.final_score, reverse=True)
+
+    # 确定哪些需要 LLM 增强
+    high_value_items = [
+        item for item in pre_processed_items 
+        if item.final_score >= LLM_SCORE_THRESHOLD
+    ][:MAX_LLM_ITEMS_PER_RUN]
+    
+    low_value_items = [
+        item for item in pre_processed_items 
+        if item not in high_value_items
+    ]
+
+    logger.info(f"筛选完成：{len(high_value_items)} 条高价值资讯将进入 LLM 增强管道，{len(low_value_items)} 条普通资讯。")
+
+    def enhance_item_with_llm(item):
+        """
+        在大线程池中对高价值项进行 LLM 增强
+        """
+        # LLM 重新归类
+        item.topic = classify_item(item.title, item.raw_summary, use_llm=True)
+        # LLM 重新摘要
+        item.one_line_summary = generate_one_line_summary(item.title, item.raw_summary, use_llm=True)
+        # 重新打分（因为 Topic 变了，Momentum 可能变）
+        score_item(item, existing_titles, topic_counts)
         return item
 
-    # 4. 逐条处理：分类、摘要、打分 (多线程并发加速)
-    logger.info("开始调用 LLM 处理摘要和分类，请耐心等待...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [
-            executor.submit(process_item, i, data, existing_titles, topic_counts)
-            for i, data in enumerate(unique_data)
-        ]
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                processed_items.append(future.result())
-            except Exception as e:
-                logger.error(f"处理条目异常: {e}")
+    # 5. 执行 LLM 并发增强
+    processed_items = []
+    if high_value_items:
+        logger.info(f"开始调用 LLM 处理 {len(high_value_items)} 条核心摘要，请稍后...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(enhance_item_with_llm, it) for it in high_value_items]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    processed_items.append(future.result())
+                except Exception as e:
+                    logger.error(f"LLM 增强条目异常: {e}")
+    
+    # 合并普通项
+    processed_items.extend(low_value_items)
         
     # 5. 入库
     logger.info("正在将处理后的数据写入数据库...")
