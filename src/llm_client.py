@@ -11,8 +11,15 @@ from typing import Optional
 BASE_DIR = Path(__file__).parent.parent
 APIKEY_PATH = BASE_DIR / "src" / "apikey.json"
 
+import os
+
 def get_minimax_key() -> str:
-    """获取 apikey.json 中保存的 Gemini / MiniMax 密钥"""
+    """获取 apikey.json 中保存的 Gemini / MiniMax 密钥，或从环境变量获取（用于 GitHub Actions）"""
+    # 优先从环境变量读取
+    env_key = os.environ.get("MINIMAX_API_KEY")
+    if env_key:
+        return env_key
+        
     try:
         if APIKEY_PATH.exists():
             with open(APIKEY_PATH, 'r', encoding='utf-8') as f:

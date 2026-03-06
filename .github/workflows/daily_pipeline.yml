@@ -26,6 +26,7 @@ jobs:
       - name: Run Pipeline
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}  # 从 GitHub Secrets 注入
         run: |
           # 确保 data 目录存在
           mkdir -p data/raw
@@ -37,13 +38,12 @@ jobs:
           python scripts/run_pipeline.py --days 1
 
       - name: Commit and Push Database
-        # 如果你想把更新后的 SQLite 存回仓库，可以打开下面的注释
-        # 注意：这可能会因为频繁提交导致仓库体积变大。
-        # 更推荐的做法是把生成的数据部署到云端或使用真正的 DB 实例。
         run: |
-          # git config --local user.email "action@github.com"
-          # git config --local user.name "GitHub Action"
-          # git add data/tech_trends.db
-          # git commit -m "Auto-update daily tech trends [skip ci]" || echo "No changes to commit"
-          # git push
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          # 使用 -f 强制添加，忽略 .gitignore 中对 .db 文件的限制
+          git add -f data/tech_trends.db
+          # 提交更改，如果没有更改则跳过
+          git commit -m "Auto-update daily tech trends [skip ci]" || echo "No changes to commit"
+          git push
           echo "Pipeline finished successfully."
