@@ -49,6 +49,7 @@ SOURCE_WEIGHTS: dict[str, float] = {
     "huggingface_blog":   0.85,
     "arxiv":              0.80,
     "github":             0.75,
+    "dblp":               0.70,
     "hacker_news":        0.65,
     "default":            0.60,
 }
@@ -62,6 +63,15 @@ SCORE_WEIGHTS = {
 
 # ─── arXiv 分类 ───────────────────────────────────────────
 ARXIV_CATEGORIES = ["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.RO", "cs.CR"]
+
+# ─── DBLP 搜索关键词 ────────────────────────────────────────
+DBLP_SEARCH_QUERIES = [
+    "large language models",
+    "prompt engineering",
+    "retrieval augmented generation",
+    "agents",
+    "robotics"
+]
 
 # ─── GitHub 搜索关键词 ─────────────────────────────────────
 GITHUB_KEYWORDS = [

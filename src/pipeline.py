@@ -18,6 +18,7 @@ from src.fetchers.arxiv_fetcher import fetch_arxiv
 from src.fetchers.github_fetcher import fetch_github
 from src.fetchers.blogs_fetcher import fetch_blogs
 from src.fetchers.hn_fetcher import fetch_hacker_news
+from src.fetchers.dblp_fetcher import fetch_dblp
 from src.aggregator import aggregate_daily_stats
 
 def run_pipeline(days_back: int = FETCH_DAYS_BACK):
@@ -50,6 +51,11 @@ def run_pipeline(days_back: int = FETCH_DAYS_BACK):
         raw_data.extend(fetch_hacker_news(days_back))
     except Exception as e:
         logger.error(f"HN 抓取异常: {e}")
+        
+    try:
+        raw_data.extend(fetch_dblp(days_back))
+    except Exception as e:
+        logger.error(f"DBLP 抓取异常: {e}")
 
     logger.info(f"总计抓取到 {len(raw_data)} 条原始数据。")
     if not raw_data:
