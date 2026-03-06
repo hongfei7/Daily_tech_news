@@ -1,87 +1,145 @@
-"""
-dblp_fetcher.py - 从 DBLP 抓取最新论文
-"""
+"""Fetch recent research-oriented items from DBLP with graceful degradation."""
+
+from __future__ import annotations
 
 import json
-from urllib import request
+import ssl
+import time
 import urllib.parse
 from datetime import datetime, timedelta
+from urllib import error, request
 
 from loguru import logger
 
-from src.config import MAX_ITEMS_PER_SOURCE, DBLP_SEARCH_QUERIES
+from src.config import DBLP_SEARCH_QUERIES, MAX_ITEMS_PER_SOURCE
 from src.utils import clean_text, make_id
 
+
+DBLP_API = "https://dblp.org/search/publ/api"
+SSL_CONTEXT = ssl._create_unverified_context()
+
+
+def _build_url(query: str, limit: int) -> str:
+    params = {
+        "q": query,
+        "format": "json",
+        "h": limit,
+    }
+    return f"{DBLP_API}?{urllib.parse.urlencode(params)}"
+
+
+def _request_json(url: str, retries: int = 2, timeout: int = 20) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            req = request.Request(url, headers={"User-Agent": "TechTrendDashboard/1.0"})
+            with request.urlopen(req, timeout=timeout, context=SSL_CONTEXT) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            last_error = exc
+            if 500 <= exc.code < 600 and attempt < retries:
+                time.sleep(1.2 * (attempt + 1))
+                continue
+            raise
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries:
+                time.sleep(1.2 * (attempt + 1))
+                continue
+            raise
+    if last_error:
+        raise last_error
+    return {}
+
+
+def _extract_items(hits: list[dict], cutoff_year: int) -> list[dict]:
+    items: list[dict] = []
+    today = datetime.now().strftime("%Y-%m-%d")
+    for hit in hits:
+        info = hit.get("info", {})
+        title = clean_text(info.get("title", ""))
+        if not title:
+            continue
+
+        year_raw = info.get("year")
+        try:
+            year_value = int(year_raw) if year_raw else cutoff_year
+        except ValueError:
+            year_value = cutoff_year
+        if year_value < cutoff_year:
+            continue
+
+        url_str = info.get("ee", info.get("url", "")) or ""
+        venue = info.get("venue", "Unknown Venue")
+        authors = info.get("authors", {}).get("author", [])
+        if isinstance(authors, dict):
+            authors = [authors]
+        elif isinstance(authors, str):
+            authors = [{"text": authors}]
+        author_names = ", ".join(author.get("text", "") for author in authors if isinstance(author, dict))
+        summary = f"Published at {venue}. Authors: {author_names}".strip()
+
+        items.append(
+            {
+                "id": make_id(url_str or title),
+                "date": today,
+                "source": "dblp",
+                "title": title,
+                "url": url_str,
+                "raw_summary": summary,
+            }
+        )
+    return items
+
+
 def fetch_dblp(days_back: int = 1) -> list[dict]:
-    """
-    通过 DBLP API 获取最新相关论文
-    DBLP 没有按时间的精细过滤 API，所以我们通过查询近期发表物并过滤
-    """
     logger.info(f"开始抓取 DBLP (过去 {days_back} 天)...")
-    items = []
-    
+    items: list[dict] = []
+
     cutoff_date = datetime.now() - timedelta(days=days_back)
     cutoff_year = cutoff_date.year
-    
+
     for query in DBLP_SEARCH_QUERIES:
-        try:
-            # 加上年份限制来缩小范围: e.g. "large language models year:2024"
-            search_term = f"{query} year:{cutoff_year}"
-            encoded_query = urllib.parse.quote_plus(search_term)
-            
-            url = f"https://dblp.org/search/publ/api?q={encoded_query}&format=json&h={MAX_ITEMS_PER_SOURCE}"
-            req = request.Request(url, headers={'User-Agent': 'Mozilla/5.0 TechTrend/1.0'})
-            
-            import ssl
-            context = ssl._create_unverified_context()
-            
-            with request.urlopen(req, timeout=15, context=context) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                
-            hits = data.get("result", {}).get("hits", {}).get("hit", [])
-            
-            for hit in hits:
-                info = hit.get("info", {})
-                
-                title = info.get("title", "")
-                title = clean_text(title)
-                if not title:
-                    continue
-                    
-                url_str = info.get("ee", info.get("url", ""))
-                
-                # DBLP通常只有年份没有具体日期，我们取当前日期作为发现日期
-                # 如果能在 info 里面找到类似 date 的，尽量解析
-                date_str = datetime.now().strftime("%Y-%m-%d")
-                
-                # DBLP通常没有详细 summary，用 Venue/Authors 拼凑一个简短的 raw_summary
-                venue = info.get("venue", "Unknown Venue")
-                authors = info.get("authors", {}).get("author", [])
-                if isinstance(authors, dict):
-                     authors = [authors]
-                elif isinstance(authors, str):
-                     authors = [{"text": authors}]
-                     
-                author_names = ", ".join([a.get("text", "") for a in authors if isinstance(a, dict)])
-                summary = f"Published at {venue}. Authors: {author_names}"
-                
-                items.append({
-                    "id": make_id(url_str or title),
-                    "date": date_str,
-                    "source": "dblp",
-                    "title": title,
-                    "url": url_str,
-                    "raw_summary": summary,
-                })
-                
-        except Exception as e:
-            logger.error(f"抓取 DBLP 失败 (query={query}): {e}")
-            
-    logger.info(f"DBLP 抓取完成，共 {len(items)} 条数据。")
-    return items
+        query_variants = [
+            f"{query} {cutoff_year}",
+            query,
+        ]
+        query_items: list[dict] = []
+        last_error: Exception | None = None
+
+        for variant in query_variants:
+            try:
+                url = _build_url(variant, MAX_ITEMS_PER_SOURCE)
+                data = _request_json(url)
+                hits = data.get("result", {}).get("hits", {}).get("hit", [])
+                query_items = _extract_items(hits, cutoff_year)
+                if variant != query and query_items:
+                    logger.debug("DBLP query fallback succeeded: '{}' -> '{}'", query, variant)
+                break
+            except error.HTTPError as exc:
+                last_error = exc
+                if exc.code >= 500:
+                    logger.warning("DBLP 临时错误，query='{}'，variant='{}'，status={}", query, variant, exc.code)
+                else:
+                    logger.warning("DBLP 请求失败，query='{}'，variant='{}'，status={}", query, variant, exc.code)
+            except Exception as exc:
+                last_error = exc
+                logger.warning("DBLP 请求异常，query='{}'，variant='{}'，error={}", query, variant, exc)
+
+        if last_error and not query_items:
+            logger.warning("跳过 DBLP query='{}'，未取到结果: {}", query, last_error)
+            continue
+
+        items.extend(query_items)
+
+    deduped = {item["id"]: item for item in items}
+    final_items = list(deduped.values())
+    logger.info(f"DBLP 抓取完成，共 {len(final_items)} 条数据。")
+    return final_items
+
 
 if __name__ == "__main__":
     from src.utils import setup_logger
+
     setup_logger()
-    res = fetch_dblp()
-    print(res[:2])
+    print(fetch_dblp()[:2])
